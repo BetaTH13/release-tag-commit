@@ -1,0 +1,47 @@
+name: CI release tag commit
+
+on:
+  pull_request:
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+        env:
+          NODE_ENV: test
+      
+      # Rebuild with your Rollup script (must output to dist/)
+      - run: npm run build
+      
+      # Fail if the build changed any tracked or untracked files in dist/
+      - name: Verify dist matches committed files
+        run: |
+          # Show a concise diff if there are changes
+          if ! git diff --quiet -- dist || [ -n "$(git ls-files --others --exclude-standard dist)" ]; then
+            echo "::error::Built dist differs from what's committed."
+            echo "Run 'npm ci && npm run build' locally and commit the updated dist/."
+            echo ""
+            echo "Changed tracked files:"
+            git diff --name-status -- dist || true
+            echo ""
+            echo "Untracked files:"
+            git ls-files --others --exclude-standard dist || true
+            exit 1
+          fi
+
+      
