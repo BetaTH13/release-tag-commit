@@ -1,0 +1,15 @@
+name: release-tag-commit
+description: GitHub Action which automatically creates a tag and release
+
+inputs:
+  token:
+    description: "GitHub token (use GITHUB_TOKEN)"
+    required: true
+  v_prefix:
+    description: "Prefix tags with 'v' (v1.2.3). Default is false"
+    required: false
+    default: "false"
+
+runs:
+  using: node24
+  main: dist/index.js

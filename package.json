@@ -1,0 +1,41 @@
+{
+  "name": "release-tag-commit",
+  "version": "1.0.0",
+  "description": "GitHub Action which automatically creates a tag and release",
+  "main": "index.js",
+  "scripts": {
+    "build": "rollup --config rollup.config.js",
+    "test": "vitest run --coverage",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BetaTH13/release-tag-commit.git"
+  },
+  "keywords": [
+    "CI",
+    "Tag creation"
+  ],
+  "author": "BetaTH13",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/BetaTH13/release-tag-commit/issues"
+  },
+  "homepage": "https://github.com/BetaTH13/release-tag-commit#readme",
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/github": "^6.0.1"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.6",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@vitest/coverage-v8": "^3.2.4",
+    "eslint": "^9.33.0",
+    "eslint-plugin-import": "^2.32.0",
+    "nock": "^14.0.10",
+    "rollup": "^4.46.2",
+    "vitest": "^3.2.4"
+  }
+}
