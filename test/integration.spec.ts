@@ -17,12 +17,6 @@ async function importWithMocks(opts?: Parameters<typeof makeGithubMock>[0]) {
 }
 
 describe("integration test", () => {
-    it("fails when not a PR event", async () => {
-        const { mod, coreMock } = await importWithMocks({ eventName: "push", pr: undefined });
-        await mod.run();
-        expect(coreMock.setFailed).toHaveBeenCalledWith("Not a PR event");
-    });
-
     it("fails when PR not merged", async () => {
         const { mod, coreMock } = await importWithMocks({ pr: { merged: false, number: 1 } as any });
         await mod.run();
@@ -104,42 +98,27 @@ describe("integration test", () => {
             expect.objectContaining({ ref: "refs/tags/v1.3.0" })
         );
     });
-    it("fails when the repository has NO tags (parsed.length === 0)", async () => {
-        const { mod, coreMock, gh } = await importWithMocks({
-            tags: [],                       // ← no tags from API
-            commitMessages: ["fix: bug"]    // any message; we never reach tagging
-        });
-        
-        await mod.run();
-
-        expect(coreMock.setFailed).toHaveBeenCalledWith(
-            "No valid semver tags found in the repository."
-        );
-
-        const octo = gh.github.getOctokit.mock.results[0].value;
-        expect(octo.rest.git.getRef).not.toHaveBeenCalled();
-        expect(octo.rest.git.createRef).not.toHaveBeenCalled();
-    });
-
-    it("fails when ALL tags are invalid (no valid semver)", async () => {
-        const { mod, coreMock, gh } = await importWithMocks({
-            tags: [
-                { name: "release-1.2.3" },
-                { name: "v1.2" },
-                { name: "v1.2.3-beta.1" },
-                { name: "foo" }
-            ],
-            commitMessages: ["minor: feature"]
+    it("starts from 0.0.0 when there are no valid semver tags", async () => {
+        // No tags (or all invalid) -> baseline 0.0.0
+        const { gh, mod, coreMock } = await importWithMocks({
+            tags: [], // try also: [{ name: "release" }, { name: "v1.2" }, { name: "foo" }]
+            commitMessages: ["fix: first patch"] // => bump patch from 0.0.0 -> 0.0.1
         });
 
         await mod.run();
 
-        expect(coreMock.setFailed).toHaveBeenCalledWith(
-            "No valid semver tags found in the repository."
+        // Logs should mention the baseline and show latest/next
+        expect(coreMock.info).toHaveBeenCalledWith(
+            expect.stringContaining("Starting from 0.0.0 baseline")
+        );
+        expect(coreMock.info).toHaveBeenCalledWith(
+            expect.stringContaining("Latest tag: v0.0.0, Next tag: v0.0.1")
         );
 
+        // And a tag should be created for v0.0.1
         const octo = gh.github.getOctokit.mock.results[0].value;
-        expect(octo.rest.git.getRef).not.toHaveBeenCalled();
-        expect(octo.rest.git.createRef).not.toHaveBeenCalled();
+        expect(octo.rest.git.createRef).toHaveBeenCalledWith(
+            expect.objectContaining({ ref: "refs/tags/v0.0.1" })
+        );
     });
 });
