@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write # required to create tags
+  pull-requests: read
 
 jobs:
   create_tag_on_merge:
