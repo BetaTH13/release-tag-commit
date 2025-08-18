@@ -31281,7 +31281,7 @@ function detectVersionIncrease(text) {
     if (patchExp.test(commitLowerCase) || fixExp.test(commitLowerCase)) {
         return "patch";
     }
-    return "patch";
+    return null;
 }
 function nextTag(major, minor, patch, versionToIncrease) {
     if (versionToIncrease == "major") {
@@ -31301,10 +31301,6 @@ async function run() {
         const vPrefix = String(coreExports.getInput("v_prefix") || "true").toLowerCase() === "true";
         const token = coreExports.getInput("token");
         const { owner, repo } = githubExports.context.repo;
-        const isPrEvent = githubExports.context.eventName === "pull_request" && !!githubExports.context.payload.pull_request;
-        if (!isPrEvent) {
-            coreExports.setFailed("Not a PR event");
-        }
         const pr = githubExports.context.payload.pull_request;
         const octokit = githubExports.getOctokit(token);
         if (!pr?.merged) {
@@ -31336,16 +31332,22 @@ async function run() {
             return p ? { name: t.name, parsed: p } : null;
         })
             .filter((x) => !!x);
+        let latestName;
+        let latestParsed;
         if (parsed.length === 0) {
-            coreExports.setFailed("No valid semver tags found in the repository.");
-            return;
+            latestParsed = [0, 0, 0];
+            latestName = formatTagToString(0, 0, 0, vPrefix);
+            coreExports.info("No valid semver tags found. Starting from 0.0.0 baseline.");
         }
-        parsed.sort((a, b) => compareTags(b.parsed, a.parsed));
-        const latest = parsed[0];
-        const [major, minor, patch] = latest.parsed;
+        else {
+            parsed.sort((a, b) => compareTags(b.parsed, a.parsed));
+            latestName = parsed[0].name;
+            latestParsed = parsed[0].parsed;
+        }
+        const [major, minor, patch] = latestParsed;
         const newTag = nextTag(major, minor, patch, versionToIncrease);
         const tagAsString = formatTagToString(newTag[0], newTag[1], newTag[2], vPrefix);
-        coreExports.info(`Latest tag: ${latest.name}, Next tag: ${tagAsString}`);
+        coreExports.info(`Latest tag: ${latestName}, Next tag: ${tagAsString}`);
         try {
             await octokit.rest.git.getRef({ owner, repo, ref: `tags/${tagAsString}` });
             coreExports.info(`Tag ${tagAsString} already exists. Nothing to do.`);
