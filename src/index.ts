@@ -1,8 +1,6 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 
-/* global console */
-
 // based on the retrieved tags
 export function parseTagFromName(tagName: string): number[] | null {
     const regex = new RegExp(/^(?:v)?(\d+)\.(\d+)\.(\d+)$/);
@@ -25,25 +23,23 @@ export function compareTags(tag: number[], tagOther: number[]) {
     return 0;
 }
 
-// Determines if what needs to increase
+// Determines what needs to increase
 export function detectVersionIncrease(text: string) {
     const commitLowerCase = text.toLowerCase();
-    const majorExp = new RegExp(/\bmajor\b/i);
-    const minorExp = new RegExp(/\bminor\b/i);
-    const patchExp = new RegExp(/\bpatch\b/i);
+    const header = commitLowerCase.split(/\r?\n/, 1)[0];
 
-    const fixExp = new RegExp(/fix/i);
-    const featExp = new RegExp(/feat/i);
-
-    const breakingChange = new RegExp(/breaking change/i);
-    const exclamationMark = new RegExp(/!/i);
-    if (majorExp.test(commitLowerCase) || breakingChange.test(commitLowerCase) || exclamationMark.test(commitLowerCase)) {
+    const breackingChangeInHead = new RegExp(/^[a-z]+(?:\([^)]+\))?!:\s/i);
+    const featExp =  new RegExp(/^feat(?:\([^)]+\))?:\s/i); 
+    const fixExp =new RegExp(/^fix(?:\([^)]+\))?:\s/i);
+    const breakingChangeInText = new RegExp(/^\s*breaking changes?:?/mi);
+    
+    if (breackingChangeInHead.test(header) || breakingChangeInText.test(commitLowerCase)) {
         return "major";
     }
-    if (minorExp.test(commitLowerCase) || featExp.test(commitLowerCase)) {
+    if (featExp.test(header)) {
         return "minor";
     }
-    if (patchExp.test(commitLowerCase) || fixExp.test(commitLowerCase)) {
+    if (fixExp.test(header)) {
         return "patch";
     }
     return null;
@@ -66,7 +62,7 @@ export function formatTagToString(major: number, minor: number, patch: number, v
 export async function run() {
     try {
         // inputs and environment
-        const vPrefix: boolean = String(core.getInput("v_prefix") || "true").toLowerCase() === "true";
+        const vPrefix: boolean = String(core.getInput("v_prefix") || "").toLowerCase() === "true";
         const token: string = core.getInput("token");
         const { owner, repo } = github.context.repo;
 
@@ -75,6 +71,7 @@ export async function run() {
 
         if (!pr?.merged) {
             core.setFailed("Not a merged PR.");
+            return;
         }
 
         const mergeCommitSha = pr?.merge_commit_sha;
@@ -94,12 +91,11 @@ export async function run() {
         commitMessages.push(...allCommitsFromPr.map(commit => commit?.commit?.message || ""));
 
         let versionToIncrease = detectVersionIncrease(commitMessages.join(","));
-        if (!versionToIncrease) {
-            const prContent = `${pr.title}\n${pr.body ?? ""}`;
-            versionToIncrease = detectVersionIncrease(prContent);
+        if (!versionToIncrease ) {
+            core.info("No matching keywords found for version update. Version update skipped");
+            return;
         }
 
-        versionToIncrease = versionToIncrease || "patch";
         core.info(
             `Version to increase: ${versionToIncrease}`
         );
@@ -155,4 +151,6 @@ export async function run() {
     }
 }
 
-run();
+if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
+  void run();
+}

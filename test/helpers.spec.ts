@@ -23,28 +23,31 @@ describe("compareTags", () => {
 });
 
 describe("detectVersionIncrease", () => {
-    it("detect major", () => {
-        expect(detectVersionIncrease("major changes")).toBe("major");
-        expect(detectVersionIncrease("MAJOR changes")).toBe("major");
-        expect(detectVersionIncrease("something BREAKING CHANGE")).toBe("major");
-        expect(detectVersionIncrease("something BREAKING change")).toBe("major");
+    it("detect major via breaking change", () => {
         expect(detectVersionIncrease("BREAKING change: test test")).toBe("major");
-        expect(detectVersionIncrease("feat!: test test")).toBe("major");
+        expect(detectVersionIncrease("breaking change: test test")).toBe("major");
     });
-    it("detect minor", () => {
-        expect(detectVersionIncrease("minor changes")).toBe("minor");
-        expect(detectVersionIncrease("MINOR changes")).toBe("minor");
+    it("detect major via !", () => {
+        expect(detectVersionIncrease("feat!: test test")).toBe("major");
+        expect(detectVersionIncrease("feat(JIRA-123)!: test test")).toBe("major");
+    });
+    it("detect major via breaking change in footoer", () => {
+        expect(detectVersionIncrease("feat: something\nBreaking changes: on something")).toBe("major");
+        expect(detectVersionIncrease("fix: test test\nBreaking changes:\nSomething else")).toBe("major");
+        expect(detectVersionIncrease("fix: test test\nBreaking changes\nSomething else")).toBe("major");
+    });
+    it("detect minor via feat", () => {
         expect(detectVersionIncrease("feat: changes")).toBe("minor");
         expect(detectVersionIncrease("FEAT: changes")).toBe("minor");
     });
-    it("detect patch", () => {
-        expect(detectVersionIncrease("patch some changes")).toBe("patch");
-        expect(detectVersionIncrease("PATCH changes")).toBe("patch");
+    it("detect patch via fix", () => {
         expect(detectVersionIncrease("fix: changes")).toBe("patch");
-        expect(detectVersionIncrease("FIX: changes")).toBe("patch");
+        expect(detectVersionIncrease("FIX(JIRA-123): changes")).toBe("patch");
     });
-    it("default to patch", () => {
+    it("defaults to null", () => {
         expect(detectVersionIncrease("something")).toBe(null);
+        expect(detectVersionIncrease("docs: something")).toBe(null);
+        expect(detectVersionIncrease("feat something")).toBe(null);
     });
 });
 
