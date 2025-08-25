@@ -61,7 +61,6 @@ export function makeGithubMock(opts?: {
         commit: { message: m }
       }));
     }
-    // repos.listTags
     return tags;
   });
 
