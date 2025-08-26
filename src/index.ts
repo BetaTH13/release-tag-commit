@@ -64,6 +64,10 @@ export async function run() {
         // inputs and environment
         const vPrefix: boolean = String(core.getInput("v_prefix") || "").toLowerCase() === "true";
         const token: string = core.getInput("token");
+        const createRelease: boolean = String(core.getInput("create_release") || "").toLowerCase() === "true";
+        const markLatest: boolean = String(core.getInput("mark_release_as_latest") || "").toLowerCase() === "true";
+        const generateNotes : boolean = String(core.getInput("generate_release_notes") || "").toLowerCase() === "true";
+
         const { owner, repo } = github.context.repo;
 
         const pr = github.context.payload.pull_request;
@@ -130,22 +134,52 @@ export async function run() {
         const tagAsString = formatTagToString(newTag[0], newTag[1], newTag[2], vPrefix);
         core.info(`Latest tag: ${latestName}, Next tag: ${tagAsString}`);
 
+        let tagExists = false;
         try {
             await octokit.rest.git.getRef({ owner, repo, ref: `tags/${tagAsString}` });
+            tagExists = true;
             core.info(`Tag ${tagAsString} already exists. Nothing to do.`);
-            return;
         } catch {
             core.info(`Tag ${tagAsString} does not exist can continue processing.`);
         }
 
-        await octokit.rest.git.createRef({
-            owner,
-            repo,
-            ref: `refs/tags/${tagAsString}`,
-            sha: mergeCommitSha,
-        });
-        core.info(`New tag created ${tagAsString}`);
+        if (!tagExists) {
+            await octokit.rest.git.createRef({
+                owner,
+                repo,
+                ref: `refs/tags/${tagAsString}`,
+                sha: mergeCommitSha,
+            });
+            core.info(`New tag created ${tagAsString}`);
+        }
+        if (createRelease) {
+            try {
+                // Check if a release already exists for this tag
+                const existing = await octokit.rest.repos.getReleaseByTag({ owner, repo, tag: tagAsString }).then(
+                    r => r.data,
+                    () => null
+                );
 
+                if (existing) {
+                    core.info(`Release for tag ${tagAsString} already exists: ${existing.html_url}`);
+                } else {
+                    const release = await octokit.rest.repos.createRelease({
+                        owner,
+                        repo,
+                        tag_name: tagAsString,
+                        target_commitish: mergeCommitSha,
+                        name: tagAsString,
+                        generate_release_notes: generateNotes,
+                        draft: false,
+                        prerelease: false,
+                        make_latest: markLatest ? "true" : "false",
+                    });
+                    core.info(`Release created: ${release.data.html_url}`);
+                }
+            } catch (err: any) {
+                core.warning(`Failed to create release for ${tagAsString}: ${err?.message ?? String(err)}`);
+            }
+        }
     } catch (error: any) {
         core.setFailed(error?.message ?? String(error));
     }

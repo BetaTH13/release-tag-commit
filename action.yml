@@ -9,6 +9,18 @@ inputs:
     description: "Prefix tags with 'v' (v1.2.3). Default is false"
     required: false
     default: "false"
+  create_release:
+    description: "If true, create a GitHub Release for the new tag"
+    required: false
+    default: "false"
+  mark_release_as_latest:
+    description: "If true, mark the created release as 'latest'"
+    required: false
+    default: "true"
+  generate_release_notes:
+    description: "If true, mark the created release as 'latest'"
+    required: false
+    default: "true"
 
 runs:
   using: node20

@@ -157,4 +157,115 @@ describe("integration test", () => {
             expect.objectContaining({ ref: "refs/tags/v1.2.4" })
         );
     });
+    it("calls getReleaseByTag and creates a release with generated notes", async () => {
+        const { gh, mod, coreMock } = await importWithMocks({
+            tags: [{ name: "v1.2.3" }],     // latest tag
+            commitMessages: ["fix: bug"],   // => bump patch -> v1.2.4
+            tagExists: false,               // ensure we don't short-circuit anything
+            releaseExists: false            // simulate no existing release for the tag
+        });
+
+        // Ensure inputs enable the release path for THIS test
+        coreMock.getInput.mockImplementation((name: string) => {
+            if (name === "v_prefix") return "true";
+            if (name === "token") return "TEST_TOKEN";
+            if (name === "create_release") return "true";
+            if (name === "mark_release_as_latest") return "true";
+            if (name === "generate_release_notes") return "true";
+            return "";
+        });
+
+        await mod.run();
+
+        const octo = gh.github.getOctokit.mock.results[0].value;
+
+        // 1) It checked for an existing release
+        expect(octo.rest.repos.getReleaseByTag).toHaveBeenCalled();
+
+        const calls = octo.rest.repos.getReleaseByTag.mock.calls;
+        const firstArg = calls[0][0];
+        expect(firstArg).toMatchObject({
+            owner: "octo",
+            repo: "hello-world",
+            tag: "v1.2.4",
+        });
+
+        // 2) It created a release with generated notes
+        expect(octo.rest.repos.createRelease).toHaveBeenCalledWith(
+            expect.objectContaining({
+                owner: "octo",
+                repo: "hello-world",
+                tag_name: "v1.2.4",
+                target_commitish: "abc123",
+                name: "v1.2.4",
+                generate_release_notes: true,
+                make_latest: "true",
+                draft: false,
+                prerelease: false,
+            })
+        );
+    });
+
+    it("does not create a Release when create_release is false", async () => {
+        const { gh, mod, coreMock } = await importWithMocks({
+            tags: [{ name: "v1.2.3" }],
+            commitMessages: ["fix: bug"]
+        });
+
+        // Override just this input
+        coreMock.getInput.mockImplementation((name: string) => {
+            if (name === "v_prefix") return "true";
+            if (name === "token") return "TEST_TOKEN";
+            if (name === "create_release") return "false"; // <-- important
+            if (name === "mark_release_as_latest") return "true";
+            if (name === "generate_release_notes") return "true";
+            return "";
+        });
+
+        await mod.run();
+
+        const octo = gh.github.getOctokit.mock.results[0].value;
+        expect(octo.rest.repos.createRelease).not.toHaveBeenCalled();
+    });
+
+    it("marks the Release as not latest when mark_release_as_latest is false", async () => {
+        const { gh, mod, coreMock } = await importWithMocks({
+            tags: [{ name: "v1.2.3" }],
+            commitMessages: ["fix: bug"],
+            releaseExists: false
+        });
+
+        coreMock.getInput.mockImplementation((name: string) => {
+            if (name === "v_prefix") return "true";
+            if (name === "token") return "TEST_TOKEN";
+            if (name === "create_release") return "true";
+            if (name === "mark_release_as_latest") return "false"; // <-- important
+            if (name === "generate_release_notes") return "true";
+            return "";
+        });
+
+        await mod.run();
+
+        const octo = gh.github.getOctokit.mock.results[0].value;
+        expect(octo.rest.repos.createRelease).toHaveBeenCalledWith(
+            expect.objectContaining({
+                make_latest: "false",
+                generate_release_notes: true
+            })
+        );
+    });
+
+    it("skips creating a Release if one already exists for the tag", async () => {
+        const { gh, mod } = await importWithMocks({
+            tags: [{ name: "v1.2.3" }],
+            commitMessages: ["fix: bug"],
+            releaseExists: true // <-- simulate existing release
+        });
+
+        await mod.run();
+
+        const octo = gh.github.getOctokit.mock.results[0].value;
+        expect(octo.rest.repos.getReleaseByTag).toHaveBeenCalled();
+        expect(octo.rest.repos.createRelease).not.toHaveBeenCalled();
+    });
 });

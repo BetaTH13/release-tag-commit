@@ -14,13 +14,15 @@ export function makeGithubMock(opts?: {
   tags?: Array<{ name: string }>;
   tagExists?: boolean;
   commitMessages?: string[];
+  releaseExists?: boolean;
 }) {
   const {
     eventName = "pull_request",
     pr = { merged: true, number: 123, merge_commit_sha: "abc123", title: "feat", body: "" },
     tags = [{ name: "v1.2.3" }, { name: "v1.2.2" }],
     tagExists = false,
-    commitMessages = ["fix: sample"]
+    commitMessages = ["fix: sample"],
+    releaseExists = false 
   } = opts || {};
 
   const context = {
@@ -34,7 +36,19 @@ export function makeGithubMock(opts?: {
       getCommit: vi.fn(async () => ({
         data: { commit: { message: commitMessages[0] ?? "" } }
       })),
-      listTags: vi.fn()
+      listTags: vi.fn(),
+      getReleaseByTag: releaseExists
+        ? vi.fn(async () => ({
+            data: { id: 1, html_url: "https://example.com/release", tag_name: "v1.2.4" }
+          }))
+        : vi.fn(async () => {
+            const err: any = new Error("Not Found");
+            err.status = 404;
+            throw err;
+          }),
+      createRelease: vi.fn(async () => ({
+        data: { id: 2, html_url: "https://example.com/new-release" }
+      }))
     },
     pulls: {
       listCommits: vi.fn(async () => ({
