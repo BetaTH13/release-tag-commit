@@ -31241,7 +31241,6 @@ function requireGithub () {
 
 var githubExports = requireGithub();
 
-/* global console */
 // based on the retrieved tags
 function parseTagFromName(tagName) {
     const regex = new RegExp(/^(?:v)?(\d+)\.(\d+)\.(\d+)$/);
@@ -31262,23 +31261,21 @@ function compareTags(tag, tagOther) {
     }
     return 0;
 }
-// Determines if what needs to increase
+// Determines what needs to increase
 function detectVersionIncrease(text) {
     const commitLowerCase = text.toLowerCase();
-    const majorExp = new RegExp(/\bmajor\b/i);
-    const minorExp = new RegExp(/\bminor\b/i);
-    const patchExp = new RegExp(/\bpatch\b/i);
-    const fixExp = new RegExp(/fix/i);
-    const featExp = new RegExp(/feat/i);
-    const breakingChange = new RegExp(/breaking change/i);
-    const exclamationMark = new RegExp(/!/i);
-    if (majorExp.test(commitLowerCase) || breakingChange.test(commitLowerCase) || exclamationMark.test(commitLowerCase)) {
+    const header = commitLowerCase.split(/\r?\n/, 1)[0];
+    const breackingChangeInHead = new RegExp(/^[a-z]+(?:\([^)]+\))?!:\s/i);
+    const featExp = new RegExp(/^feat(?:\([^)]+\))?:\s/i);
+    const fixExp = new RegExp(/^fix(?:\([^)]+\))?:\s/i);
+    const breakingChangeInText = new RegExp(/^\s*breaking changes?:?/mi);
+    if (breackingChangeInHead.test(header) || breakingChangeInText.test(commitLowerCase)) {
         return "major";
     }
-    if (minorExp.test(commitLowerCase) || featExp.test(commitLowerCase)) {
+    if (featExp.test(header)) {
         return "minor";
     }
-    if (patchExp.test(commitLowerCase) || fixExp.test(commitLowerCase)) {
+    if (fixExp.test(header)) {
         return "patch";
     }
     return null;
@@ -31298,13 +31295,14 @@ function formatTagToString(major, minor, patch, vPrefix) {
 async function run() {
     try {
         // inputs and environment
-        const vPrefix = String(coreExports.getInput("v_prefix") || "true").toLowerCase() === "true";
+        const vPrefix = String(coreExports.getInput("v_prefix") || "").toLowerCase() === "true";
         const token = coreExports.getInput("token");
         const { owner, repo } = githubExports.context.repo;
         const pr = githubExports.context.payload.pull_request;
         const octokit = githubExports.getOctokit(token);
         if (!pr?.merged) {
             coreExports.setFailed("Not a merged PR.");
+            return;
         }
         const mergeCommitSha = pr?.merge_commit_sha;
         const commitMessages = [];
@@ -31320,10 +31318,9 @@ async function run() {
         commitMessages.push(...allCommitsFromPr.map(commit => commit?.commit?.message || ""));
         let versionToIncrease = detectVersionIncrease(commitMessages.join(","));
         if (!versionToIncrease) {
-            const prContent = `${pr.title}\n${pr.body ?? ""}`;
-            versionToIncrease = detectVersionIncrease(prContent);
+            coreExports.info("No matching keywords found for version update. Version update skipped");
+            return;
         }
-        versionToIncrease = versionToIncrease || "patch";
         coreExports.info(`Version to increase: ${versionToIncrease}`);
         const allTags = await octokit.paginate(octokit.rest.repos.listTags, { owner, repo, per_page: 100 });
         const parsed = allTags
@@ -31368,7 +31365,8 @@ async function run() {
         coreExports.setFailed(error?.message ?? String(error));
     }
 }
-run();
+if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
+    void run();
+}
 
 export { compareTags, detectVersionIncrease, formatTagToString, nextTag, parseTagFromName, run };
-//# sourceMappingURL=index.js.map
