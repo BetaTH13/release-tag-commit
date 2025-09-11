@@ -8,6 +8,8 @@ type MergeablePR = {
   body?: string | null;
 };
 
+type IssueComment = { id: number; body: string; user?: { type?: string } };
+
 export function makeGithubMock(opts?: {
   eventName?: string;
   pr?: MergeablePR | null;
@@ -66,7 +68,12 @@ export function makeGithubMock(opts?: {
             throw err;
           }),
       createRef: vi.fn(async () => ({ data: { ref: "refs/tags/new" } }))
-    }
+    },
+    issues: {
+      listComments: vi.fn(async () => ({ data: [] as IssueComment[] })), // default: no existing comments
+      createComment: vi.fn(async () => ({ data: { id: 101 } })),
+      updateComment: vi.fn(async () => ({ data: { id: 101 } })),
+    },
   };
 
   const paginate = vi.fn(async (fn: any) => {

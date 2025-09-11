@@ -31292,39 +31292,68 @@ function nextTag(major, minor, patch, versionToIncrease) {
 function formatTagToString(major, minor, patch, vPrefix) {
     return `${vPrefix ? "v" : ""}${major}.${minor}.${patch}`;
 }
+async function upsertPrComment(octokit, owner, repo, prNumber, body, marker = "release-tag-commit-bot") {
+    const markerStart = `<!-- ${marker}:start -->`;
+    const markerEnd = `<!-- ${marker}:end -->`;
+    const wrapped = `${markerStart}\n${body}\n${markerEnd}`;
+    const { data: comments } = await octokit.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page: 100 });
+    const existing = comments.find((c) => typeof c.body === 'string' && c.body.includes(markerStart) && c.user?.type === 'Bot');
+    if (existing) {
+        await octokit.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: wrapped });
+    }
+    else {
+        await octokit.rest.issues.createComment({ owner, repo, issue_number: prNumber, body: wrapped });
+    }
+}
 async function run() {
     try {
-        // inputs and environment
+        // convert inputs
         const vPrefix = String(coreExports.getInput("v_prefix") || "").toLowerCase() === "true";
         const token = coreExports.getInput("token");
         const createRelease = String(coreExports.getInput("create_release") || "").toLowerCase() === "true";
         const markLatest = String(coreExports.getInput("mark_release_as_latest") || "").toLowerCase() === "true";
         const generateNotes = String(coreExports.getInput("generate_release_notes") || "").toLowerCase() === "true";
+        const commentPr = String(coreExports.getInput("comment_pr") || "").toLowerCase() === "true";
+        //retrieve context data
         const { owner, repo } = githubExports.context.repo;
         const pr = githubExports.context.payload.pull_request;
         const octokit = githubExports.getOctokit(token);
-        if (!pr?.merged) {
-            coreExports.setFailed("Not a merged PR.");
+        // must be a PR context
+        if (!pr) {
+            coreExports.setFailed("Not a PR context.");
             return;
         }
-        const mergeCommitSha = pr?.merge_commit_sha;
-        const commitMessages = [];
-        if (mergeCommitSha) {
-            const mergeCommit = await octokit.rest.repos.getCommit({ owner, repo, ref: mergeCommitSha });
-            commitMessages.push(mergeCommit.data.commit.message);
-        }
-        else {
-            coreExports.setFailed("PR has no merge_commit_sha. Cannot create a tag.");
-            return;
-        }
+        //check if merged PR
+        const isMerged = !!pr.merged;
+        // collect PR commits (works for preview + merged)
         const allCommitsFromPr = await octokit.paginate(octokit.rest.pulls.listCommits, { owner, repo, pull_number: pr.number, per_page: 100 });
-        commitMessages.push(...allCommitsFromPr.map(commit => commit?.commit?.message || ""));
+        const commitMessages = allCommitsFromPr.map(c => c?.commit?.message || "");
+        // if merged, also include merge commit message in detection/logs
+        let mergeCommitSha = pr.merge_commit_sha;
+        if (isMerged) {
+            if (!mergeCommitSha) {
+                coreExports.setFailed("PR has no merge_commit_sha. Cannot create a tag.");
+                return;
+            }
+            try {
+                const mergeCommit = await octokit.rest.repos.getCommit({ owner, repo, ref: mergeCommitSha });
+                commitMessages.unshift(mergeCommit.data.commit.message || "");
+            }
+            catch {
+                coreExports.info("Could not read merge commit message; continuing.");
+            }
+        }
+        // determine version increase (from all commit messages)
         let versionToIncrease = detectVersionIncrease(commitMessages.join(","));
         if (!versionToIncrease) {
             coreExports.info("No matching keywords found for version update. Version update skipped");
+            if (commentPr) {
+                const body = `📝 No bump detected.\n\n- I looked for \`feat\`, \`fix\`, or \`BREAKING CHANGE\` in the PR commits.\n- No new tag will be created on merge.`;
+                await upsertPrComment(octokit, owner, repo, pr.number, body);
+            }
             return;
         }
-        coreExports.info(`Version to increase: ${versionToIncrease}`);
+        // latest tag → next tag
         const allTags = await octokit.paginate(octokit.rest.repos.listTags, { owner, repo, per_page: 100 });
         const parsed = allTags
             .map(t => {
@@ -31332,22 +31361,40 @@ async function run() {
             return p ? { name: t.name, parsed: p } : null;
         })
             .filter((x) => !!x);
+        // determine latest tag
         let latestName;
         let latestParsed;
         if (parsed.length === 0) {
             latestParsed = [0, 0, 0];
             latestName = formatTagToString(0, 0, 0, vPrefix);
-            coreExports.info("No valid semver tags found. Starting from 0.0.0 baseline.");
+            coreExports.info("No valid tags found. Starting from 0.0.0 baseline.");
         }
         else {
             parsed.sort((a, b) => compareTags(b.parsed, a.parsed));
             latestName = parsed[0].name;
             latestParsed = parsed[0].parsed;
         }
+        // determine next tag and format
         const [major, minor, patch] = latestParsed;
         const newTag = nextTag(major, minor, patch, versionToIncrease);
         const tagAsString = formatTagToString(newTag[0], newTag[1], newTag[2], vPrefix);
         coreExports.info(`Latest tag: ${latestName}, Next tag: ${tagAsString}`);
+        // comment (preview or confirmation)
+        if (commentPr) {
+            const body = `🔖 **Next tag:** \`${tagAsString}\`\n\n` +
+                `- Reason: **${versionToIncrease}** bump inferred from commit messages.\n` +
+                `- Prefix \`v\`: **${vPrefix ? "on" : "off"}**\n` +
+                (isMerged
+                    ? `- Status: PR is merged; tag will be created (or already created) on the merge commit.`
+                    : `- Status: Preview only; tag will be created if this PR is merged.`);
+            await upsertPrComment(octokit, owner, repo, pr.number, body);
+        }
+        // exits here if it's a preview (PR not merged)
+        if (!isMerged) {
+            coreExports.info("Preview only; not creating tags or releases.");
+            return;
+        }
+        // check if tag already exists. (fail safe)
         let tagExists = false;
         try {
             await octokit.rest.git.getRef({ owner, repo, ref: `tags/${tagAsString}` });
@@ -31355,7 +31402,7 @@ async function run() {
             coreExports.info(`Tag ${tagAsString} already exists. Nothing to do.`);
         }
         catch {
-            coreExports.info(`Tag ${tagAsString} does not exist can continue processing.`);
+            coreExports.info(`Tag ${tagAsString} does not exist; can continue processing.`);
         }
         if (!tagExists) {
             await octokit.rest.git.createRef({
@@ -31366,9 +31413,9 @@ async function run() {
             });
             coreExports.info(`New tag created ${tagAsString}`);
         }
+        // create release if requested also checks if it doesn't exist yet fail safe
         if (createRelease) {
             try {
-                // Check if a release already exists for this tag
                 const existing = await octokit.rest.repos.getReleaseByTag({ owner, repo, tag: tagAsString }).then(r => r.data, () => null);
                 if (existing) {
                     coreExports.info(`Release for tag ${tagAsString} already exists: ${existing.html_url}`);
@@ -31397,8 +31444,9 @@ async function run() {
         coreExports.setFailed(error?.message ?? String(error));
     }
 }
+// only run if not in test environment for testing
 if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
     void run();
 }
 
-export { compareTags, detectVersionIncrease, formatTagToString, nextTag, parseTagFromName, run };
+export { compareTags, detectVersionIncrease, formatTagToString, nextTag, parseTagFromName, run, upsertPrComment };

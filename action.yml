@@ -21,6 +21,10 @@ inputs:
     description: "If true, mark the created release as 'latest'"
     required: false
     default: "true"
+  comment_pr:
+    description: "If true, the tag that would be created is posted as a sticky comment in the PR"
+    required: false
+    default: "false"
 
 runs:
   using: node20
