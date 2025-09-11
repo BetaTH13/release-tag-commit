@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: write
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   create_tag_on_merge:
@@ -27,3 +27,4 @@ jobs:
           create_release: "true"
           mark_release_as_latest: "true"
           generate_release_notes: "true"
+          comment_pr: "true"
