@@ -1,5 +1,20 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { parseTagFromName, compareTags, detectVersionIncrease, nextTag, formatTagToString } from "../src/index.js";
+
+import coreMock from "./mocks/actionsCore";
+import { makeGithubMock } from "./mocks/actionsGithub";
+
+async function importWithMocks(opts?: Parameters<typeof makeGithubMock>[0]) {
+    vi.resetModules();
+    vi.clearAllMocks();
+
+    vi.doMock("@actions/core", () => coreMock);
+    const gh = makeGithubMock(opts);
+    vi.doMock("@actions/github", () => gh.github as any);
+
+    const mod = await import("../src/index");
+    return { mod, coreMock, gh };
+}
 
 describe("parseTagFromName", () => {
     it("parses v-prefixed and plain", () => {
@@ -72,4 +87,114 @@ describe("formatTagToString", () => {
         expect(formatTagToString(1, 2, 3, true)).toBe("v1.2.3");
         expect(formatTagToString(1, 2, 3, false)).toBe("1.2.3");
     });
+});
+
+describe("upsertPrComment (using integration mocks)", () => {
+  it("creates a PR conversation comment when none exists", async () => {
+    const { mod, gh } = await importWithMocks({
+      pr: { merged: false, number: 88 } as any,
+    });
+
+    // Get an octokit instance from the same mocked factory the action uses
+    const octo: any = gh.github.getOctokit();
+
+    // Ensure the Issues API exists (minimal wiring if your mock didn't add it yet)
+    octo.rest.issues ??= {
+      listComments: vi.fn(async () => ({ data: [] })),
+      createComment: vi.fn(async () => ({ data: { id: 101 } })),
+      updateComment: vi.fn(async () => ({ data: { id: 101 } })),
+    };
+
+    // No existing sticky comment
+    (octo.rest.issues.listComments as any).mockResolvedValueOnce({ data: [] });
+
+    await mod.upsertPrComment(
+      octo,
+      gh.github.context.repo.owner,
+      gh.github.context.repo.repo,
+      88,
+      "Hello from bot",
+      "release-tag-commit-bot"
+    );
+
+    expect(octo.rest.issues.listComments).toHaveBeenCalledWith(
+      expect.objectContaining({ issue_number: 88 })
+    );
+    expect(octo.rest.issues.createComment).toHaveBeenCalledTimes(1);
+    expect(octo.rest.issues.updateComment).not.toHaveBeenCalled();
+  });
+
+  it("updates existing sticky bot comment instead of creating a duplicate", async () => {
+    const { mod, gh } = await importWithMocks({
+      pr: { merged: false, number: 7 } as any,
+    });
+
+    const octo: any = gh.github.getOctokit();
+    octo.rest.issues ??= {
+      listComments: vi.fn(async () => ({ data: [] })),
+      createComment: vi.fn(async () => ({ data: { id: 101 } })),
+      updateComment: vi.fn(async () => ({ data: { id: 999 } })),
+    };
+
+    // Pretend a previous bot comment with our marker already exists
+    (octo.rest.issues.listComments as any).mockResolvedValueOnce({
+      data: [
+        {
+          id: 999,
+          body: "<!-- release-tag-commit-bot:start -->old\n<!-- release-tag-commit-bot:end -->",
+          user: { type: "Bot" },
+        },
+      ],
+    });
+
+    await mod.upsertPrComment(
+      octo,
+      gh.github.context.repo.owner,
+      gh.github.context.repo.repo,
+      7,
+      "New content",
+      "release-tag-commit-bot"
+    );
+
+    expect(octo.rest.issues.updateComment).toHaveBeenCalledWith(
+      expect.objectContaining({ comment_id: 999 })
+    );
+    expect(octo.rest.issues.createComment).not.toHaveBeenCalled();
+  });
+
+  it("ignores non-bot marker comment and creates a new one", async () => {
+    const { mod, gh } = await importWithMocks({
+      pr: { merged: false, number: 55 } as any,
+    });
+
+    const octo: any = gh.github.getOctokit();
+    octo.rest.issues ??= {
+      listComments: vi.fn(async () => ({ data: [] })),
+      createComment: vi.fn(async () => ({ data: { id: 101 } })),
+      updateComment: vi.fn(async () => ({ data: { id: 123 } })),
+    };
+
+    // Existing comment has the marker but is from a non-bot user → should create a new comment
+    (octo.rest.issues.listComments as any).mockResolvedValueOnce({
+      data: [
+        {
+          id: 123,
+          body: "<!-- release-tag-commit-bot:start -->user content\n<!-- release-tag-commit-bot:end -->",
+          user: { type: "User" },
+        },
+      ],
+    });
+
+    await mod.upsertPrComment(
+      octo,
+      gh.github.context.repo.owner,
+      gh.github.context.repo.repo,
+      55,
+      "Fresh bot content",
+      "release-tag-commit-bot"
+    );
+
+    expect(octo.rest.issues.createComment).toHaveBeenCalledTimes(1);
+    expect(octo.rest.issues.updateComment).not.toHaveBeenCalled();
+  });
 });

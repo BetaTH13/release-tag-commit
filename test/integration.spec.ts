@@ -17,12 +17,6 @@ async function importWithMocks(opts?: Parameters<typeof makeGithubMock>[0]) {
 }
 
 describe("integration test", () => {
-    it("fails when PR not merged", async () => {
-        const { mod, coreMock } = await importWithMocks({ pr: { merged: false, number: 1 } as any });
-        await mod.run();
-        expect(coreMock.setFailed).toHaveBeenCalledWith("Not a merged PR.");
-    });
-
     it("fails when no merge_commit_sha", async () => {
         const { mod, coreMock } = await importWithMocks({
             pr: { merged: true, number: 1, merge_commit_sha: undefined } as any
@@ -267,5 +261,167 @@ describe("integration test", () => {
         const octo = gh.github.getOctokit.mock.results[0].value;
         expect(octo.rest.repos.getReleaseByTag).toHaveBeenCalled();
         expect(octo.rest.repos.createRelease).not.toHaveBeenCalled();
+    });
+    it("posts a preview comment on open PRs and does not create a tag", async () => {
+        const { gh, mod, coreMock } = await importWithMocks({
+            pr: { merged: false, number: 42 } as any, // open PR, not merged
+            tags: [{ name: "v1.2.3" }],
+            commitMessages: ["fix: something"] // => patch bump preview
+        });
+
+        // enable commenting
+        coreMock.getInput.mockImplementation((name: string) => {
+            if (name === "v_prefix") return "true";
+            if (name === "token") return "TEST_TOKEN";
+            if (name === "comment_pr") return "true";
+            // leave release inputs default (true in your default mock, but irrelevant here)
+            return "";
+        });
+
+        await mod.run();
+
+        const octo = gh.github.getOctokit.mock.results[0].value;
+
+        // Should have tried to comment on the PR conversation
+        expect(octo.rest.issues.listComments).toHaveBeenCalledWith(
+            expect.objectContaining({ issue_number: 42 })
+        );
+        expect(octo.rest.issues.createComment).toHaveBeenCalledTimes(1);
+        // No tag should be created in preview mode
+        expect(octo.rest.git.createRef).not.toHaveBeenCalled();
+        expect(coreMock.setFailed).not.toHaveBeenCalled();
+    });
+
+    it("updates existing sticky bot comment instead of creating a duplicate", async () => {
+        const { gh, mod, coreMock } = await importWithMocks({
+            pr: { merged: false, number: 7 } as any,
+            tags: [{ name: "v1.2.3" }],
+            commitMessages: ["fix: quick patch"]
+        });
+
+        // Arrange BEFORE run(): return an existing bot comment with our marker
+        gh.spies.rest.issues = gh.spies.rest.issues || {
+            listComments: vi.fn(async () => ({ data: [] })),
+            createComment: vi.fn(async () => ({ data: { id: 101 } })),
+            updateComment: vi.fn(async () => ({ data: { id: 999 } })),
+        };
+        gh.spies.rest.issues.listComments.mockResolvedValueOnce({
+            data: [
+                {
+                    id: 999,
+                    body: "<!-- release-tag-commit-bot:start -->old\n<!-- release-tag-commit-bot:end -->",
+                    user: { type: "Bot" },
+                },
+            ],
+        });
+
+        // If your `makeGithubMock` doesn’t wire `issues` into `rest`, do it now:
+        if (!('issues' in gh.spies.rest)) {
+            // @ts-ignore - test-only wiring
+            gh.spies.rest.issues = gh.spies.rest.issues;
+        }
+
+        coreMock.getInput.mockImplementation((name: string) => {
+            if (name === "v_prefix") return "true";
+            if (name === "token") return "TEST_TOKEN";
+            if (name === "comment_pr") return "true";
+            return "";
+        });
+
+        await mod.run();
+
+        // Now get the instance that run() created
+        const octo = gh.github.getOctokit.mock.results[0].value;
+
+        expect(octo.rest.issues.updateComment).toHaveBeenCalledWith(
+            expect.objectContaining({ comment_id: 999 })
+        );
+        expect(octo.rest.issues.createComment).not.toHaveBeenCalled();
+        expect(octo.rest.git.createRef).not.toHaveBeenCalled(); // preview → no tag
+        expect(coreMock.setFailed).not.toHaveBeenCalled();
+    });
+
+    it("posts a 'No bump detected' comment when no matching keywords exist", async () => {
+        const { gh, mod, coreMock } = await importWithMocks({
+            pr: { merged: false, number: 11 } as any,
+            tags: [{ name: "v1.2.3" }],
+            commitMessages: ["chore: refactor"] // no bump
+        });
+
+        coreMock.getInput.mockImplementation((name: string) => {
+            if (name === "v_prefix") return "true";
+            if (name === "token") return "TEST_TOKEN";
+            if (name === "comment_pr") return "true";
+            return "";
+        });
+
+        await mod.run();
+
+        const octo = gh.github.getOctokit.mock.results[0].value;
+
+        expect(coreMock.info).toHaveBeenCalledWith(
+            "No matching keywords found for version update. Version update skipped"
+        );
+        expect(octo.rest.issues.createComment).toHaveBeenCalledTimes(1);
+        expect(octo.rest.git.createRef).not.toHaveBeenCalled();
+        expect(coreMock.setFailed).not.toHaveBeenCalled();
+    });
+
+    it("updates the confirmation comment after a merged PR", async () => {
+        const { gh, mod, coreMock } = await importWithMocks({
+            pr: { merged: true, number: 7, merge_commit_sha: "abc123" } as any,
+            tags: [{ name: "v1.2.3" }],
+            commitMessages: ["fix: quick patch"], // => patch -> v1.2.4
+            tagExists: false,                      // ensure a tag is created
+            releaseExists: false                   // we’ll disable release creation via inputs below
+        });
+
+        if (!gh.spies.rest.issues) {
+            gh.spies.rest.issues = {
+                listComments: vi.fn(async () => ({ data: [] })),
+                createComment: vi.fn(async () => ({ data: { id: 101 } })),
+                updateComment: vi.fn(async () => ({ data: { id: 999 } })),
+            };
+        }
+
+        gh.spies.rest.issues.listComments.mockResolvedValueOnce({
+            data: [
+                {
+                    id: 999,
+                    body: "<!-- release-tag-commit-bot:start -->old\n<!-- release-tag-commit-bot:end -->",
+                    user: { type: "Bot" },
+                },
+            ],
+        });
+
+        // Inputs: enable commenting; keep release off to focus the test
+        coreMock.getInput.mockImplementation((name: string) => {
+            if (name === "v_prefix") return "true";
+            if (name === "token") return "TEST_TOKEN";
+            if (name === "comment_pr") return "true";
+            if (name === "create_release") return "false";
+            if (name === "mark_release_as_latest") return "false";
+            if (name === "generate_release_notes") return "false";
+            return "";
+        });
+
+        await mod.run();
+
+        const octo = gh.github.getOctokit.mock.results[0].value;
+        expect(octo.rest.issues.updateComment).toHaveBeenCalledWith(
+            expect.objectContaining({ comment_id: 999 })
+        );
+        expect(octo.rest.issues.createComment).not.toHaveBeenCalled();
+        const updatedBody = octo.rest.issues.updateComment.mock.calls[0][0].body as string;
+        expect(updatedBody).toContain("**Next tag:** `v1.2.4`");
+        expect(updatedBody).toContain("Status: PR is merged; tag will be created (or already created) on the merge commit.");
+        expect(octo.rest.git.getRef).toHaveBeenCalledWith(
+            expect.objectContaining({ ref: "tags/v1.2.4" })
+        );
+        expect(octo.rest.git.createRef).toHaveBeenCalledWith(
+            expect.objectContaining({ ref: "refs/tags/v1.2.4", sha: "abc123" })
+        );
+        expect(octo.rest.repos.createRelease).not.toHaveBeenCalled();
+        expect(coreMock.setFailed).not.toHaveBeenCalled();
     });
 });

@@ -3,8 +3,13 @@ name: CI release tag commit
 on:
   pull_request:
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   integration-tests:
+    name: Integration Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -25,10 +30,8 @@ jobs:
         env:
           NODE_ENV: test
       
-      # Rebuild with your Rollup script (must output to dist/)
       - run: npm run build
       
-      # Fail if the build changed any tracked or untracked files in dist/
       - name: Verify dist matches committed files
         run: |
           # Show a concise diff if there are changes
@@ -43,5 +46,21 @@ jobs:
             git ls-files --others --exclude-standard dist || true
             exit 1
           fi
+  tag-preview:
+    name: Preview Tag on PR
+    if: ${{ github.event.pull_request.merged != true && github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Preview next tag
+        uses: ./
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}  
+          comment_pr: 'true'
+          create_release: 'false'
+          mark_release_as_latest: 'false'
+          generate_release_notes: 'false'
+
 
       
