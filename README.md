@@ -9,23 +9,25 @@ This action analyzes commit messages inside a merged PR to determine the correct
 - `!:`, or commits containing `BREAKING CHANGE` → major version bump
 
 It will then:
+
 - Create the next tag in sequence.
 - Optionally create a GitHub Release.
 - Optionally auto-generate release notes.
 - Optionally mark the release as **latest**.
+- Optionally add the new tag as a comment to the PR
 
 ---
 
-
 ## ⚙️ Inputs
 
-| Name                     | Required | Default   | Description                                                                 |
-|--------------------------|----------|-----------|-----------------------------------------------------------------------------|
-| `token`                  | ✅       | –         | GitHub token (use `${{ secrets.GITHUB_TOKEN }}`).                           |
-| `v_prefix`               | ❌       | `"false"` | Prefix tags with `v` (e.g. `v1.2.3`).                                      |
-| `create_release`         | ❌       | `"false"` | If `"true"`, create a GitHub Release after tagging.                         |
-| `mark_release_as_latest` | ❌       | `"true"`  | If `"true"`, mark the created release as latest.                            |
-| `generate_release_notes` | ❌       | `"true"`  | If `"true"`, let GitHub auto-generate release notes.                        |
+| Name                     | Required | Default   | Description                                                                    |
+| ------------------------ | -------- | --------- | ------------------------------------------------------------------------------ |
+| `token`                  | ✅       | –         | GitHub token (use `${{ secrets.GITHUB_TOKEN }}`).                              |
+| `v_prefix`               | ❌       | `"false"` | Prefix tags with `v` (e.g. `v1.2.3`).                                          |
+| `create_release`         | ❌       | `"false"` | If `"true"`, create a GitHub Release after tagging.                            |
+| `mark_release_as_latest` | ❌       | `"true"`  | If `"true"`, mark the created release as latest.                               |
+| `generate_release_notes` | ❌       | `"true"`  | If `"true"`, let GitHub auto-generate release notes.                           |
+| `comment_pr`             | ❌       | `"fakse"` | If `"true"`, add the new tag as a comment to the PR before and after the merge |
 
 ⚠️ **Note:** All inputs must be strings (`"true"` / `"false"`) because GitHub Actions passes inputs as strings.
 
