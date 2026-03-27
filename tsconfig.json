@@ -11,7 +11,8 @@
     "checkJs": false,
     "noEmit": true,
     "baseUrl": ".",
-    "importHelpers": false
+    "importHelpers": false,
+    "outDir": "dist"
   },
   "include": ["src/**/*", "tests/**/*", "global.d.ts"],
   "exclude": ["node_modules", "dist", "build"]
