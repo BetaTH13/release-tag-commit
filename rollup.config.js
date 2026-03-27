@@ -11,6 +11,7 @@ const config = {
     format: "es",
     sourcemap: false,
   },
+  context: "globalThis",
   plugins: [commonjs(), nodeResolve({ preferBuiltins: true }), json(), typescript({ tsconfig: "./tsconfig.build.json" })]
 };
 

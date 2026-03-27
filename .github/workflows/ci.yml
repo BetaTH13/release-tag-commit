@@ -16,14 +16,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+          cache: pnpm
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm i
 
       - name: Run tests
         run: npm test
@@ -37,7 +42,7 @@ jobs:
           # Show a concise diff if there are changes
           if ! git diff --quiet -- dist || [ -n "$(git ls-files --others --exclude-standard dist)" ]; then
             echo "::error::Built dist differs from what's committed."
-            echo "Run 'npm ci && npm run build' locally and commit the updated dist/."
+            echo "Run 'pnpm ci && pnpm run build' locally and commit the updated dist/."
             echo ""
             echo "Changed tracked files:"
             git diff --name-status -- dist || true
