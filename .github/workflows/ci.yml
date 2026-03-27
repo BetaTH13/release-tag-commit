@@ -35,7 +35,7 @@ jobs:
         env:
           NODE_ENV: test
       
-      - run: npm run build
+      - run: pnpm run build
       
       - name: Verify dist matches committed files
         run: |
